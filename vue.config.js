@@ -1,15 +1,19 @@
-const path = require('path-browserify');
-const os = require('os-browserify/browser');
-const crypto = require('crypto-browserify');
+const webpack = require('webpack');
 
 module.exports = {
   configureWebpack: {
     resolve: {
       fallback: {
-        path: path,
-        os: os,
-        crypto: crypto,
+        path: require.resolve('path-browserify'),
+        os: require.resolve('os-browserify/browser'),
+        crypto: require.resolve('crypto-browserify'),
       },
     },
+    plugins: [
+      new webpack.ProvidePlugin({
+        process: 'process/browser',
+        Buffer: ['buffer', 'Buffer'],
+      }),
+    ],
   },
 };
