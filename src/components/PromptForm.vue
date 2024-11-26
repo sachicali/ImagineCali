@@ -19,6 +19,10 @@
 </template>
 
 <script>
+import dotenv from 'dotenv';
+
+dotenv.config();
+
 export default {
   data() {
     return {
@@ -31,7 +35,7 @@ export default {
       const response = await fetch('https://api-inference.huggingface.co/models/YOUR_MODEL_NAME', {
         method: 'POST',
         headers: {
-          'Authorization': 'Bearer YOUR_ACTUAL_HUGGINGFACE_API_KEY',
+          'Authorization': `Bearer ${process.env.HUGGINGFACE_API_KEY}`,
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
