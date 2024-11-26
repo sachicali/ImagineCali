@@ -1,4 +1,7 @@
 import { createApp } from 'vue';
 import App from './App.vue';
+import PromptForm from './components/PromptForm.vue';
 
-createApp(App).mount('#app');
+const app = createApp(App);
+app.component('PromptForm', PromptForm);
+app.mount('#app');
