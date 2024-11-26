@@ -1,125 +1,95 @@
 <template>
-  <div id="app">
-    <h1>n8n Workflow</h1>
-    <PromptForm @submit="handleSubmission" />
-    <div v-if="result">
-      <h2>Generated Art:</h2>
-      <p>{{ result }}</p>
-    </div>
-    <WorkflowNode v-for="node in nodes" :key="node.id" :node="node" />
+  <div class="app">
+    <header>
+      <h1>CALI Imagine</h1>
+      <p>No ads, no more time-out errors, no BS. Chi-made</p>
+      <nav>
+        <router-link to="/" class="nav-button">Home</router-link>
+        <router-link to="/gallery" class="nav-button">Previous Gen</router-link>
+      </nav>
+    </header>
+    <main>
+      <router-view></router-view>
+    </main>
   </div>
 </template>
 
 <script>
-import WorkflowNode from './components/WorkflowNode.vue';
+import { RouterLink, RouterView } from 'vue-router'
 import PromptForm from './components/PromptForm.vue';
 
 export default {
   name: 'App',
   components: {
-    WorkflowNode,
+    RouterLink,
+    RouterView,
     PromptForm
-  },
-  data() {
-    return {
-      nodes: [
-        {
-          id: "6abe578b-d503-4da5-9af8-f9977de71139",
-          name: "Vivid Pop Explosion",
-          parameters: {
-            assignments: {
-              assignments: [
-                {
-                  id: "9ec60f33-b940-40a6-9f8a-cb944b7065f1",
-                  name: "stylePrompt",
-                  type: "string",
-                  value: "=rule of thirds, golden ratio, hyper-maximalist, vibrant neon, high-contrast, octane render, photorealism, 8k ::7 --ar 16:9 --s 1000\n\nDesign a fun, energetic scene filled with bold, neon colors, and playful shapes that pop off the screen. The image should evoke a sense of joy and movement, using fluid, organic forms and exaggerated, cartoon-like proportions. Focus on creating a lively atmosphere with contrasting, saturated tones and dynamic lighting. Use a mix of asymmetrical and balanced compositions to create a playful visual flow. Render in 8K with a hyper-maximalist approach using Octane Render for vibrant, high-gloss textures and photorealistic lighting effects. Include:"
-                }
-              ]
-            }
-          }
-        },
-        {
-          id: "7de1ea42-3b18-4bfb-8ea4-a8b6c8d16763",
-          name: "AI Dystopia",
-          parameters: {
-            assignments: {
-              assignments: [
-                {
-                  id: "9ec60f33-b940-40a6-9f8a-cb944b7065f1",
-                  name: "stylePrompt",
-                  type: "string",
-                  value: "=golden ratio, rule of thirds, cyberpunk, glitch art, octane render, cinematic realism, 8k ::7 --ar 16:9 --s 1000\n\nGenerate a futuristic, cyberpunk dystopia with metallic textures, digital glitches, and neon lights. Blend cold, dystopian structures with traces of organic life. Use photorealistic lighting and dynamic reflections to enhance the visual depth of the scene. Include:"
-                }
-              ]
-            }
-          }
-        },
-        {
-          id: "aa17c288-78e0-48d9-9c60-0e63e351d0b6",
-          name: "Post-Analog Glitchscape",
-          parameters: {
-            assignments: {
-              assignments: [
-                {
-                  id: "9ec60f33-b940-40a6-9f8a-cb944b7065f1",
-                  name: "stylePrompt",
-                  type: "string",
-                  value: "=rule of thirds, asymmetric composition, glitch art, pixelation, VHS noise, octane render, unreal engine, 8k ::7 --ar 16:9 --s 1200\nDesign a glitchy, post-analog world with digital decay and broken visuals. Utilize pixelated elements, VHS noise, and neon glitches to create a fragmented aesthetic. Use bold, contrasting colors against muted backgrounds for a high-contrast, otherworldly feel. The composition should follow asymmetrical rules, focusing on chaotic yet intentional visual balance. Include:"
-                }
-              ]
-            }
-          }
-        },
-        {
-          id: "769ff46c-630f-456d-ae19-4c6496270fda",
-          name: "Neon Fauvism",
-          parameters: {
-            assignments: {
-              assignments: [
-                {
-                  id: "9ec60f33-b940-40a6-9f8a-cb944b7065f1",
-                  name: "stylePrompt",
-                  type: "string",
-                  value: "=asymmetric composition, golden ratio, neon colors, abstract forms, octane render, cinematic realism, unreal engine, 8k ::7 --ar 16:9 --s 1000\nCreate a bold, vivid composition using neon colors and fluid shapes that break away from reality. Focus on abstract forms, blending Fauvism's exaggerated color palette with modern digital art techniques. Use asymmetric composition and dynamic lighting. Render with a vibrant, high-energy aesthetic. Include:"
-                }
-              ]
-            }
-          }
-        },
-        {
-          id: "400dcfaa-3061-4319-aa3e-5a89445bc26d",
-          name: "Animoji",
-          parameters: {
-            assignments: {
-              assignments: [
-                {
-                  id: "9ec60f33-b940-40a6-9f8a-cb944b7065f1",
-                  name: "stylePrompt",
-                  type: "string",
-                  value: "=yellow disney cartoon cat (action), slightly side view (angle), very high angle (angle), in the style of simple 3d rendered characters, in the style of a video game, 4k, 3D render, 3D animation, white background, isolated"
-                }
-              ]
-            }
-          }
-        }
-      ],
-      result: null
-    };
-  },
-  methods: {
-    handleSubmission(data) {
-      this.result = data;
-    }
   }
 };
 </script>
 
-<style scoped>
-#app {
-  font-family: Avenir, Helvetica, Arial, sans-serif;
+<style>
+:root {
+  --primary-color: #4CAF50;
+  --error-color: #c62828;
+  --text-color: #333;
+  --background-color: #f5f5f5;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen,
+    Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+  line-height: 1.6;
+  color: var(--text-color);
+  background-color: var(--background-color);
+}
+
+.app {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 2rem;
+}
+
+header {
   text-align: center;
-  color: #2c3e50;
-  margin-top: 60px;
+  margin-bottom: 2rem;
+}
+
+h1 {
+  font-size: 2.5rem;
+  color: var(--primary-color);
+  margin-bottom: 0.5rem;
+}
+
+main {
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  padding: 2rem;
+}
+
+.nav-button {
+  display: inline-block;
+  padding: 0.5rem 1rem;
+  margin: 0.5rem;
+  background-color: var(--primary-color);
+  color: white;
+  text-decoration: none;
+  border-radius: 4px;
+  transition: background-color 0.2s;
+}
+
+.nav-button:hover {
+  background-color: #45a049;
+}
+
+.router-link-active {
+  background-color: #45a049;
 }
 </style>
