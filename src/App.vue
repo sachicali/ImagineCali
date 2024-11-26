@@ -1,17 +1,24 @@
 <template>
   <div id="app">
     <h1>n8n Workflow</h1>
+    <PromptForm @submit="handleSubmission" />
+    <div v-if="result">
+      <h2>Generated Art:</h2>
+      <p>{{ result }}</p>
+    </div>
     <WorkflowNode v-for="node in nodes" :key="node.id" :node="node" />
   </div>
 </template>
 
 <script>
 import WorkflowNode from './components/WorkflowNode.vue';
+import PromptForm from './components/PromptForm.vue';
 
 export default {
   name: 'App',
   components: {
-    WorkflowNode
+    WorkflowNode,
+    PromptForm
   },
   data() {
     return {
@@ -96,8 +103,14 @@ export default {
             }
           }
         }
-      ]
+      ],
+      result: null
     };
+  },
+  methods: {
+    handleSubmission(data) {
+      this.result = data;
+    }
   }
 };
 </script>
