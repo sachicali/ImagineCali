@@ -1,6 +1,6 @@
 import express from 'express';
 import cors from 'cors';
-import { S3Client, ListObjectsV2Command, GetObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, ListObjectsV2Command, GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
@@ -14,8 +14,33 @@ const __dirname = dirname(__filename);
 dotenv.config({ path: join(__dirname, '.env') });
 
 const app = express();
-app.use(cors());
-app.use(express.json());
+
+// Configure express and middleware
+const corsOptions = {
+  origin: '*',
+  methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
+  preflightContinue: false,
+  optionsSuccessStatus: 204
+};
+
+app.use(cors(corsOptions));
+
+// Increase payload size limits for all parsers
+app.use(express.json({
+  limit: '50mb',
+  extended: true,
+  parameterLimit: 50000
+}));
+
+app.use(express.urlencoded({
+  limit: '50mb',
+  extended: true,
+  parameterLimit: 50000
+}));
+
+app.use(express.raw({
+  limit: '50mb'
+}));
 
 // Configure S3 client for R2
 const s3Client = new S3Client({
@@ -210,6 +235,53 @@ app.post('/api/generate-image', async (req, res) => {
   } catch (error) {
     console.error('Error generating image:', error);
     res.status(500).json({ error: error.message });
+  }
+});
+
+// Upload image to R2
+app.post('/api/upload', async (req, res) => {
+  try {
+    const { imageData, prompt, style } = req.body;
+    
+    if (!imageData) {
+      return res.status(400).json({ error: 'No image data provided' });
+    }
+
+    // Generate a unique filename
+    const timestamp = new Date().toISOString();
+    const key = `${timestamp}-${prompt.substring(0, 30)}.png`;
+
+    // Upload to R2
+    const command = new PutObjectCommand({
+      Bucket: process.env.R2_BUCKET_NAME,
+      Key: key,
+      Body: Buffer.from(imageData),
+      ContentType: 'image/png',
+      Metadata: {
+        prompt,
+        style,
+        timestamp
+      }
+    });
+
+    await s3Client.send(command);
+
+    // Generate a signed URL for immediate access
+    const getObjectCommand = new GetObjectCommand({
+      Bucket: process.env.R2_BUCKET_NAME,
+      Key: key,
+    });
+    const url = await getSignedUrl(s3Client, getObjectCommand, { expiresIn: 3600 });
+
+    res.status(200).json({ 
+      success: true, 
+      key,
+      url,
+      message: 'Image saved to gallery'
+    });
+  } catch (error) {
+    console.error('Upload error:', error);
+    res.status(500).json({ error: 'Failed to upload image' });
   }
 });
 
