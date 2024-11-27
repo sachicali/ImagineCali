@@ -1,296 +1,234 @@
 import express from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
+import compression from 'compression';
+import cookieParser from 'cookie-parser';
+import rateLimit from 'express-rate-limit';
 import { S3Client, ListObjectsV2Command, GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import fetch from 'node-fetch';
+import multer from 'multer';
+import morgan from 'morgan';
+import fs from 'fs';
+import path from 'path';
+import { verifyToken } from './api/auth.js';
+
+// Load environment variables
+import dotenv from 'dotenv';
+dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// Load environment variables from .env file
-dotenv.config({ path: join(__dirname, '.env') });
-
+// Initialize Express app
 const app = express();
+const port = process.env.PORT || 3000;
 
-// Configure express and middleware
+// Security configurations
 const corsOptions = {
-  origin: '*',
-  methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
-  preflightContinue: false,
-  optionsSuccessStatus: 204
+    origin: process.env.CLIENT_URL || 'http://localhost:8081',
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization']
 };
 
+const limiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 100 // limit each IP to 100 requests per windowMs
+});
+
+// Configure multer for file uploads
+const upload = multer({
+    storage: multer.memoryStorage(),
+    limits: {
+        fileSize: parseInt(process.env.MAX_PAYLOAD_SIZE) || 10 * 1024 * 1024 // Default 10MB
+    }
+});
+
+// Logging setup
+const logDirectory = path.join(__dirname, 'logs');
+fs.existsSync(logDirectory) || fs.mkdirSync(logDirectory);
+
+const accessLogStream = fs.createWriteStream(
+    path.join(logDirectory, 'access.log'),
+    { flags: 'a' }
+);
+
+// Middleware
+app.use(helmet()); // Security headers
 app.use(cors(corsOptions));
-
-// Increase payload size limits for all parsers
-app.use(express.json({
-  limit: '50mb',
-  extended: true,
-  parameterLimit: 50000
-}));
-
-app.use(express.urlencoded({
-  limit: '50mb',
-  extended: true,
-  parameterLimit: 50000
-}));
-
-app.use(express.raw({
-  limit: '50mb'
-}));
+app.use(compression()); // Response compression
+app.use(cookieParser(process.env.COOKIE_SECRET));
+app.use(express.json({ limit: process.env.MAX_PAYLOAD_SIZE || '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: process.env.MAX_PAYLOAD_SIZE || '50mb' }));
+app.use(morgan('combined', { stream: accessLogStream }));
+app.use('/api', limiter);
 
 // Configure S3 client for R2
 const s3Client = new S3Client({
-  region: 'auto',
-  endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
-  credentials: {
-    accessKeyId: process.env.R2_ACCESS_KEY_ID,
-    secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
-  },
-  forcePathStyle: true
-});
-
-// Add a simple health check endpoint
-app.get('/api/health', (req, res) => {
-  res.json({ 
-    status: 'ok',
-    r2Config: {
-      accountId: process.env.R2_ACCOUNT_ID,
-      bucketName: process.env.R2_BUCKET_NAME,
-      endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`
-    }
-  });
-});
-
-// Test the connection on startup
-const testConnection = async () => {
-  try {
-    console.log('R2 Configuration:');
-    console.log('----------------');
-    console.log('Account ID:', process.env.R2_ACCOUNT_ID);
-    console.log('Bucket:', process.env.R2_BUCKET_NAME);
-    console.log('Access Key Length:', process.env.R2_ACCESS_KEY_ID?.length);
-    console.log('Secret Key Length:', process.env.R2_SECRET_ACCESS_KEY?.length);
-    console.log('Endpoint:', `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`);
-    console.log('----------------');
-    
-    const command = new ListObjectsV2Command({
-      Bucket: process.env.R2_BUCKET_NAME,
-      MaxKeys: 1 // Just test with one key to verify access
-    });
-    
-    console.log('Sending test ListObjectsV2Command...');
-    const response = await s3Client.send(command);
-    console.log('R2 connection test response:', {
-      successful: true,
-      bucketName: process.env.R2_BUCKET_NAME,
-      isEmpty: !response.Contents || response.Contents.length === 0,
-      objectCount: response.Contents?.length || 0
-    });
-  } catch (error) {
-    console.error('R2 connection test failed:', {
-      message: error.message,
-      code: error.code,
-      name: error.name,
-      requestId: error.$metadata?.requestId,
-      cfRay: error.$metadata?.cfRay,
-      statusCode: error.$metadata?.httpStatusCode,
-      stack: error.stack
-    });
-  }
-};
-
-// Call test connection
-testConnection();
-
-app.get('/api/gallery', async (req, res) => {
-  try {
-    console.log('Fetching gallery images from R2...');
-    console.log('Current R2 Configuration:');
-    console.log('------------------------');
-    console.log('Account ID:', process.env.R2_ACCOUNT_ID);
-    console.log('Bucket:', process.env.R2_BUCKET_NAME);
-    console.log('Access Key ID:', process.env.R2_ACCESS_KEY_ID?.substring(0, 5) + '...');
-    console.log('Secret Key:', process.env.R2_SECRET_ACCESS_KEY?.substring(0, 5) + '...');
-    console.log('------------------------');
-    
-    // Create a new client for this request to ensure we have fresh configuration
-    const client = new S3Client({
-      region: 'auto',
-      endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
-      credentials: {
+    region: 'auto',
+    endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+    credentials: {
         accessKeyId: process.env.R2_ACCESS_KEY_ID,
         secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
-      },
-      forcePathStyle: true
-    });
+    },
+    forcePathStyle: true
+});
 
-    console.log('Endpoint:', client.config.endpoint);
-    
-    const command = new ListObjectsV2Command({
-      Bucket: process.env.R2_BUCKET_NAME
-    });
-
-    console.log('Sending ListObjectsV2Command...');
-    const response = await client.send(command);
-    
-    if (!response.Contents || response.Contents.length === 0) {
-      console.log('No images found in bucket');
-      return res.json({ 
-        images: [],
-        message: 'No images found in gallery. Generate some images first!'
-      });
+// Health check endpoint
+app.get('/api/health', (req, res) => {
+    const healthcheck = {
+        uptime: process.uptime(),
+        message: 'OK',
+        timestamp: Date.now(),
+        env: process.env.NODE_ENV,
+        r2Config: {
+            accountId: process.env.R2_ACCOUNT_ID,
+            bucketName: process.env.R2_BUCKET_NAME,
+            endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`
+        }
+    };
+    try {
+        res.json(healthcheck);
+    } catch (error) {
+        healthcheck.message = error;
+        res.status(503).json(healthcheck);
     }
+});
 
-    console.log(`Found ${response.Contents.length} images, generating signed URLs...`);
+// Protected gallery endpoint
+app.get('/api/gallery', verifyToken, async (req, res) => {
+    try {
+        const command = new ListObjectsV2Command({
+            Bucket: process.env.R2_BUCKET_NAME
+        });
+        
+        const response = await s3Client.send(command);
+        const objects = response.Contents || [];
+        
+        const gallery = await Promise.all(objects.map(async (object) => {
+            const getCommand = new GetObjectCommand({
+                Bucket: process.env.R2_BUCKET_NAME,
+                Key: object.Key
+            });
+            
+            const url = await getSignedUrl(s3Client, getCommand, { expiresIn: 3600 });
+            return {
+                key: object.Key,
+                url,
+                lastModified: object.LastModified,
+                size: object.Size,
+                metadata: object.Metadata || {}
+            };
+        }));
+        
+        res.json(gallery);
+    } catch (error) {
+        console.error('Error fetching gallery:', error);
+        res.status(500).json({ error: 'Failed to fetch gallery' });
+    }
+});
 
-    // Generate signed URLs for each image
-    const images = await Promise.all(
-      response.Contents.map(async (object) => {
-        try {
-          const getObjectCommand = new GetObjectCommand({
+// Protected upload endpoint
+app.post('/api/upload', verifyToken, upload.single('imageData'), async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ error: 'No image file provided' });
+        }
+
+        const { prompt, style } = req.body;
+        const userId = req.user.id; // From verifyToken middleware
+        
+        const timestamp = Date.now();
+        const filename = `fg-${userId}-${timestamp}.jpg`;
+        
+        const command = new PutObjectCommand({
             Bucket: process.env.R2_BUCKET_NAME,
-            Key: object.Key,
-          });
-          const url = await getSignedUrl(client, getObjectCommand, { expiresIn: 3600 });
-          return {
-            key: object.Key,
+            Key: filename,
+            Body: req.file.buffer,
+            ContentType: 'image/jpeg',
+            Metadata: {
+                userId: userId.toString(),
+                prompt: prompt || '',
+                style: style || '',
+                timestamp: timestamp.toString()
+            }
+        });
+        
+        await s3Client.send(command);
+        
+        const getCommand = new GetObjectCommand({
+            Bucket: process.env.R2_BUCKET_NAME,
+            Key: filename
+        });
+        
+        const url = await getSignedUrl(s3Client, getCommand, { expiresIn: 3600 });
+        
+        res.json({
+            success: true,
+            filename,
             url,
-            uploaded: object.LastModified
-          };
-        } catch (error) {
-          console.error(`Error generating signed URL for ${object.Key}:`, error);
-          return null;
-        }
-      })
-    );
+            metadata: {
+                userId,
+                prompt,
+                style,
+                timestamp
+            }
+        });
+    } catch (error) {
+        console.error('Upload error:', error);
+        res.status(500).json({ error: 'Failed to upload image' });
+    }
+});
 
-    // Filter out any failed URLs
-    const validImages = images.filter(img => img !== null);
-    
-    console.log(`Successfully generated ${validImages.length} signed URLs`);
-    return res.json({ 
-      images: validImages,
-      message: validImages.length === 0 ? 'No accessible images found' : undefined
+// Error handling middleware
+app.use((err, req, res, next) => {
+    console.error('Error:', {
+        message: err.message,
+        stack: process.env.NODE_ENV === 'development' ? err.stack : undefined,
+        timestamp: new Date().toISOString(),
+        path: req.path,
+        method: req.method,
+        ip: req.ip
     });
 
-  } catch (error) {
-    console.error('Gallery fetch error:', {
-      message: error.message,
-      code: error.code,
-      name: error.name,
-      statusCode: error.$metadata?.httpStatusCode,
-      stack: error.stack
-    });
-
-    // Handle specific error cases
-    if (error.name === 'NoSuchBucket') {
-      return res.status(500).json({ 
-        error: 'Gallery is not yet set up. Please check your R2 bucket configuration.' 
-      });
+    if (err.name === 'MulterError') {
+        return res.status(400).json({
+            error: 'File upload error',
+            details: err.message
+        });
     }
 
-    res.status(500).json({ 
-      error: 'Failed to fetch gallery images. Please try again later.' 
+    res.status(err.status || 500).json({
+        error: process.env.NODE_ENV === 'development' ? err.message : 'Internal server error'
     });
-  }
 });
 
-// HuggingFace API proxy endpoint
-app.post('/api/generate-image', async (req, res) => {
-  try {
-    const { prompt, style } = req.body;
-    const fullPrompt = `Depict ${prompt}\n\nStyle: ${style}`;
-    
-    console.log('Sending request to HuggingFace API with prompt:', fullPrompt);
-    
-    const response = await fetch('https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-dev', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${process.env.HUGGINGFACE_API_KEY}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        inputs: fullPrompt,
-        parameters: {
-          num_inference_steps: 50,
-          guidance_scale: 7.5
-        }
-      })
-    });
-
-    if (!response.ok) {
-      const error = await response.json();
-      console.error('HuggingFace API error:', error);
-      return res.status(response.status).json(error);
-    }
-
-    const imageBlob = await response.blob();
-    const buffer = await imageBlob.arrayBuffer();
-    res.set('Content-Type', 'image/jpeg');
-    res.send(Buffer.from(buffer));
-  } catch (error) {
-    console.error('Error generating image:', error);
-    res.status(500).json({ error: error.message });
-  }
+// 404 handler
+app.use((req, res) => {
+    res.status(404).json({ error: 'Not found' });
 });
 
-// Upload image to R2
-app.post('/api/upload', async (req, res) => {
-  try {
-    const { imageData, prompt, style } = req.body;
-    
-    if (!imageData) {
-      return res.status(400).json({ error: 'No image data provided' });
-    }
-
-    // Generate a unique filename
-    const timestamp = new Date().toISOString();
-    const key = `${timestamp}-${prompt.substring(0, 30)}.png`;
-
-    // Upload to R2
-    const command = new PutObjectCommand({
-      Bucket: process.env.R2_BUCKET_NAME,
-      Key: key,
-      Body: Buffer.from(imageData),
-      ContentType: 'image/png',
-      Metadata: {
-        prompt,
-        style,
-        timestamp
-      }
-    });
-
-    await s3Client.send(command);
-
-    // Generate a signed URL for immediate access
-    const getObjectCommand = new GetObjectCommand({
-      Bucket: process.env.R2_BUCKET_NAME,
-      Key: key,
-    });
-    const url = await getSignedUrl(s3Client, getObjectCommand, { expiresIn: 3600 });
-
-    res.status(200).json({ 
-      success: true, 
-      key,
-      url,
-      message: 'Image saved to gallery'
-    });
-  } catch (error) {
-    console.error('Upload error:', error);
-    res.status(500).json({ error: 'Failed to upload image' });
-  }
+// Start server
+const server = app.listen(port, () => {
+    console.log(`Server running on port ${port} (${process.env.NODE_ENV})`);
+    console.log('Configuration:');
+    console.log('- NODE_ENV:', process.env.NODE_ENV);
+    console.log('- CLIENT_URL:', process.env.CLIENT_URL);
+    console.log('- R2_ACCOUNT_ID:', process.env.R2_ACCOUNT_ID ? '✓' : '✗');
+    console.log('- R2_ACCESS_KEY_ID:', process.env.R2_ACCESS_KEY_ID ? '✓' : '✗');
+    console.log('- R2_SECRET_ACCESS_KEY:', process.env.R2_SECRET_ACCESS_KEY ? '✓' : '✗');
+    console.log('- R2_BUCKET_NAME:', process.env.R2_BUCKET_NAME ? '✓' : '✗');
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-  console.log('Environment variables loaded:');
-  console.log('- R2_ACCOUNT_ID:', process.env.R2_ACCOUNT_ID ? '✓' : '✗');
-  console.log('- R2_ACCESS_KEY_ID:', process.env.R2_ACCESS_KEY_ID ? '✓' : '✗');
-  console.log('- R2_SECRET_ACCESS_KEY:', process.env.R2_SECRET_ACCESS_KEY ? '✓' : '✗');
-  console.log('- R2_BUCKET_NAME:', process.env.R2_BUCKET_NAME ? '✓' : '✗');
+// Graceful shutdown
+process.on('SIGTERM', () => {
+    console.log('SIGTERM received. Shutting down gracefully...');
+    server.close(() => {
+        console.log('Server closed');
+        process.exit(0);
+    });
 });
+
+export default app;
